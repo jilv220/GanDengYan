@@ -8,8 +8,7 @@ defmodule GanDengYan.MixProject do
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      escript: [main_module: GanDengYan],
-      elixirc_paths: ["lib/gandengyan", "lib/gandengyan.ex"]
+      escript: [main_module: GanDengYan]
     ]
   end
 
