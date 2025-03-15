@@ -36,8 +36,10 @@ defmodule GanDengYan.GameServer do
        started: false,
        last_play: nil,
        last_valid_play: nil,
+       last_valid_player_idx: nil,
        passes: 0,
-       winner: nil
+       winner: nil,
+       deck: []
      }}
   end
 
@@ -66,7 +68,7 @@ defmodule GanDengYan.GameServer do
     else
       # Deal cards
       deck = Deck.make() |> Dealer.shuffle()
-      {players_with_cards, _} = Dealer.deal(deck, state.players)
+      {players_with_cards, remaining_deck} = Dealer.deal(deck, state.players)
 
       # Find banker index
       banker_idx = Enum.find_index(players_with_cards, & &1.is_banker)
@@ -75,7 +77,8 @@ defmodule GanDengYan.GameServer do
         state
         | players: players_with_cards,
           current_player_idx: banker_idx,
-          started: true
+          started: true,
+          deck: remaining_deck
       }
 
       {:reply, {:ok, new_state}, new_state}
@@ -160,6 +163,7 @@ defmodule GanDengYan.GameServer do
                       current_player_idx: next_player_idx,
                       last_play: pattern,
                       last_valid_play: pattern,
+                      last_valid_player_idx: player_idx,
                       passes: 0
                   }
 
@@ -201,24 +205,38 @@ defmodule GanDengYan.GameServer do
           # If everyone except the last valid player has passed, reset
           if passes >= length(state.players) - 1 do
             # Find the player who made the last valid play
-            last_player_idx =
-              Enum.find_index(state.players, fn p ->
-                Enum.find(p.hand, &(&1 == hd(state.last_valid_play.cards)))
-              end)
+            last_player_idx = state.last_valid_player_idx
 
-            # If we can't find that player (cards have been played), just go to the next
-            actual_next_idx =
-              if is_nil(last_player_idx), do: next_player_idx, else: last_player_idx
+            if is_nil(last_player_idx) do
+              # If we can't find that player, just go to the next
+              new_state = %{
+                state
+                | current_player_idx: next_player_idx,
+                  last_play: nil,
+                  last_valid_play: nil,
+                  last_valid_player_idx: nil,
+                  passes: 0
+              }
 
-            new_state = %{
-              state
-              | current_player_idx: actual_next_idx,
-                last_play: nil,
-                last_valid_play: nil,
-                passes: 0
-            }
+              {:reply, {:ok, :everyone_passed}, new_state}
+            else
+              # Award a card to the last player who played a valid pattern that couldn't be beat
+              {new_players, new_deck} =
+                draw_card_for_player(state.players, last_player_idx, state.deck)
 
-            {:reply, {:ok, :everyone_passed}, new_state}
+              new_state = %{
+                state
+                | players: new_players,
+                  deck: new_deck,
+                  current_player_idx: last_player_idx,
+                  last_play: nil,
+                  last_valid_play: nil,
+                  last_valid_player_idx: nil,
+                  passes: 0
+              }
+
+              {:reply, {:ok, :everyone_passed, last_player_idx}, new_state}
+            end
           else
             new_state = %{
               state
@@ -235,5 +253,21 @@ defmodule GanDengYan.GameServer do
   @impl true
   def handle_call(:get_state, _from, state) do
     {:reply, state, state}
+  end
+
+  # Helper function to draw a card for a player
+  defp draw_card_for_player(players, player_idx, []) do
+    # If deck is empty, just return the players and empty deck
+    {players, []}
+  end
+
+  defp draw_card_for_player(players, player_idx, deck) do
+    player = Enum.at(players, player_idx)
+    {card, rest_deck} = List.pop_at(deck, 0)
+
+    updated_player = %Player{player | hand: player.hand ++ [card]}
+    updated_players = List.replace_at(players, player_idx, updated_player)
+
+    {updated_players, rest_deck}
   end
 end

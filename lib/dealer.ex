@@ -15,24 +15,19 @@ defmodule Dealer do
       end
 
     # Deal cards to players
-    # Distribute cards as evenly as possible
-    num_players = length(players_with_banker)
-    cards_per_player = div(length(deck), num_players)
-    remainder = rem(length(deck), num_players)
+    # Banker always gets 7 cards, others get 6
+    {updated_players, remaining_deck} =
+      Enum.map_reduce(players_with_banker, deck, fn player, remaining_deck ->
+        # Banker gets 7 cards, others get 6
+        cards_to_deal = if player.is_banker, do: 7, else: 6
 
-    {updated_players, _} =
-      Enum.map_reduce(players_with_banker, {deck, 0}, fn player, {remaining_deck, idx} ->
-        # Banker gets one extra card if there's a remainder
-        extra = if player.is_banker and remainder > 0, do: 1, else: 0
-        player_count = cards_per_player + extra
-
-        {player_cards, new_remaining} = Enum.split(remaining_deck, player_count)
+        {player_cards, new_remaining} = Enum.split(remaining_deck, cards_to_deal)
         updated_player = %Player{player | hand: player_cards}
 
-        {updated_player, {new_remaining, idx + 1}}
+        {updated_player, new_remaining}
       end)
 
-    # Empty deck after dealing
-    {updated_players, []}
+    # Return updated players and remaining deck
+    {updated_players, remaining_deck}
   end
 end

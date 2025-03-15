@@ -5,7 +5,7 @@ defmodule Card do
   defstruct suit: nil, face: nil, value: 0
 
   @card_order %{
-    2 => 2,
+    2 => 15,
     3 => 3,
     4 => 4,
     5 => 5,
@@ -18,7 +18,7 @@ defmodule Card do
     :queen => 12,
     :king => 13,
     :ace => 14,
-    :joker => 15
+    :joker => 16
   }
 
   @spec to_string(t()) :: String.t()

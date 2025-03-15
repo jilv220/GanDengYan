@@ -212,6 +212,21 @@ defmodule GanDengYan do
     cond do
       input == "pass" and not is_nil(game_state.last_valid_play) ->
         case GanDengYan.GameServer.pass(game_pid, player_name) do
+          {:ok, :everyone_passed, last_player_idx} ->
+            last_player = Enum.at(game_state.players, last_player_idx)
+
+            if player_name == last_player.name do
+              IO.puts(
+                "\n*** Everyone passed on your play! You get to draw a card and play again! ***"
+              )
+
+              IO.puts("A card has been added to your hand.")
+            else
+              IO.puts("Everyone passed! #{last_player.name} gets to draw a card and play again.")
+            end
+
+            play_game(player_name, game_pid)
+
           {:ok, _} ->
             IO.puts("You passed.")
             play_game(player_name, game_pid)
@@ -309,6 +324,25 @@ defmodule GanDengYan do
     cond do
       input == "pass" and not is_nil(game_state.last_valid_play) ->
         case GanDengYan.GameServer.pass(game_pid, player_name) do
+          {:ok, :everyone_passed, last_player_idx} ->
+            last_player = Enum.at(game_state.players, last_player_idx)
+
+            if player_name == last_player.name do
+              :gen_tcp.send(
+                socket,
+                "\n*** Everyone passed on your play! You get to draw a card and play again! ***\n"
+              )
+
+              :gen_tcp.send(socket, "A card has been added to your hand.\n")
+            else
+              :gen_tcp.send(
+                socket,
+                "Everyone passed! #{last_player.name} gets to draw a card and play again.\n"
+              )
+            end
+
+            client_play_game(socket, game_pid, player_name)
+
           {:ok, _} ->
             :gen_tcp.send(socket, "You passed.\n")
             client_play_game(socket, game_pid, player_name)
@@ -380,26 +414,6 @@ defmodule GanDengYan do
           end
         end
     end
-  end
-
-  defp display_hand_with_indices(hand) do
-    # Sort cards by value (high to low) and then by suit
-    hand
-    |> Enum.sort_by(fn card -> {-Card.value(card), card.suit} end)
-    |> Enum.with_index()
-    |> Enum.each(fn {card, idx} ->
-      IO.puts("#{idx}: #{Card.to_string(card)}")
-    end)
-  end
-
-  defp format_hand_with_indices(hand) do
-    # Sort cards by value (high to low) and then by suit
-    hand
-    |> Enum.sort_by(fn card -> {-Card.value(card), card.suit} end)
-    |> Enum.with_index()
-    |> Enum.map_join("\n", fn {card, idx} ->
-      "#{idx}: #{Card.to_string(card)}"
-    end)
   end
 
   defp print_game_state(state) do
