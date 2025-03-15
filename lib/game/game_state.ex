@@ -5,7 +5,7 @@ defmodule GanDengYan.Game.GameState do
   This module contains the game state struct and functions to manipulate it.
   """
 
-  alias GanDengYan.Game.{Player, Card, CardPattern, Deck}
+  alias GanDengYan.Game.{Player, CardPattern, Deck}
 
   @type t :: %__MODULE__{
           players: [Player.t()],
@@ -78,7 +78,7 @@ defmodule GanDengYan.Game.GameState do
     {:error, :game_already_started}
   end
 
-  def start_game(%__MODULE__{players: players} = state) when length(players) < 2 do
+  def start_game(%__MODULE__{players: players} = _state) when length(players) < 2 do
     {:error, :not_enough_players}
   end
 

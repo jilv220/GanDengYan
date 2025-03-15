@@ -7,20 +7,24 @@ defmodule GanDengYan.Server.TCPServer do
 
   alias GanDengYan.UI.Formatter
   alias GanDengYan.Server.GameServer
+  alias GanDengYan.Server.BroadcastManager
+
+  require Logger
 
   @doc """
   Starts a TCP server on the specified port.
 
   Returns {:ok, listen_socket} on success, or {:error, reason} on failure.
   """
-  @spec start(integer(), pid()) :: {:ok, port()} | {:error, any()}
+  @spec start(integer(), pid()) :: {:ok, port(), pid()} | {:error, any()}
   def start(port \\ 4040, game_pid) do
     case :gen_tcp.listen(port, [:binary, packet: :line, active: false, reuseaddr: true]) do
       {:ok, listen_socket} ->
-        IO.puts("Server started on port #{port}")
+        Logger.info("Server started on port #{port}")
         {:ok, listen_socket, game_pid}
 
       {:error, reason} ->
+        Logger.error("Failed to start server: #{inspect(reason)}")
         {:error, reason}
     end
   end
@@ -34,6 +38,7 @@ defmodule GanDengYan.Server.TCPServer do
       {:ok, client_socket} ->
         # Set socket options
         :ok = :inet.setopts(client_socket, [{:keepalive, true}])
+        Logger.info("New client connection accepted")
 
         # Handle client in a separate process
         spawn_link(fn -> handle_client(client_socket, game_pid) end)
@@ -42,7 +47,7 @@ defmodule GanDengYan.Server.TCPServer do
         accept_connections(listen_socket, game_pid)
 
       {:error, reason} ->
-        IO.puts("Error accepting connection: #{reason}")
+        Logger.error("Error accepting connection: #{inspect(reason)}")
         # Try again after a short delay
         :timer.sleep(1000)
         accept_connections(listen_socket, game_pid)
@@ -61,12 +66,15 @@ defmodule GanDengYan.Server.TCPServer do
     case :gen_tcp.recv(socket, 0, 30000) do
       {:ok, data} ->
         player_name = String.trim(data)
+        Logger.info("Player #{player_name} trying to join")
 
         # Join the game
         case GameServer.join(game_pid, player_name) do
           {:ok, _} ->
+            Logger.info("Player #{player_name} joined successfully")
+
             # Register this client with the broadcast manager
-            GanDengYan.Server.BroadcastManager.register_client(socket, player_name)
+            BroadcastManager.register_client(socket, player_name)
 
             # Notify the client
             :gen_tcp.send(socket, "Successfully joined game as #{player_name}\n")
@@ -74,13 +82,14 @@ defmodule GanDengYan.Server.TCPServer do
 
             # Notify all other clients about the new player
             player_joined_msg = "\n#{player_name} has joined the game.\n"
-            GanDengYan.Server.BroadcastManager.broadcast(player_joined_msg, socket)
+            BroadcastManager.broadcast(player_joined_msg, socket)
 
             # Enter the client loop
             client_loop(socket, game_pid, player_name)
 
           {:error, reason} ->
             error_msg = error_message(reason)
+            Logger.warning("Player #{player_name} failed to join: #{error_msg}")
             :gen_tcp.send(socket, "Error joining game: #{error_msg}\n")
             # Give the client a chance to read the error
             :timer.sleep(3000)
@@ -88,7 +97,7 @@ defmodule GanDengYan.Server.TCPServer do
         end
 
       {:error, reason} ->
-        IO.puts("Error receiving data: #{reason}")
+        Logger.error("Error receiving player name: #{inspect(reason)}")
         :gen_tcp.close(socket)
     end
   end
@@ -105,7 +114,7 @@ defmodule GanDengYan.Server.TCPServer do
     if game_state.started do
       handle_game_play(socket, game_pid, player_name)
     else
-      # Check if the socket is still open
+      # Check if the socket is still open with a short timeout
       case :gen_tcp.recv(socket, 0, 1000) do
         {:ok, _data} ->
           # Unexpected data received, ignore it
@@ -115,9 +124,10 @@ defmodule GanDengYan.Server.TCPServer do
           # This is expected, just keep looping
           client_loop(socket, game_pid, player_name)
 
-        {:error, _reason} ->
+        {:error, reason} ->
+          Logger.info("Client disconnected: #{player_name}, reason: #{inspect(reason)}")
           # Socket closed, unregister the client
-          GanDengYan.Server.BroadcastManager.unregister_client(socket)
+          BroadcastManager.unregister_client(socket)
           :gen_tcp.close(socket)
       end
     end
@@ -132,7 +142,16 @@ defmodule GanDengYan.Server.TCPServer do
 
     # Send game state to client
     state_str = Formatter.format_game_state(game_state)
-    :gen_tcp.send(socket, state_str)
+
+    case :gen_tcp.send(socket, state_str) do
+      :ok ->
+        :ok
+
+      {:error, _reason} ->
+        # If we can't send to the socket, assume client disconnected
+        handle_client_disconnect(socket, game_pid, player_name)
+        exit(:normal)
+    end
 
     if game_state.winner do
       # Game over
@@ -143,16 +162,33 @@ defmodule GanDengYan.Server.TCPServer do
       # Get current player
       current_player = Enum.at(game_state.players, game_state.current_player_idx)
 
-      if current_player.name == player_name do
+      if current_player && current_player.name == player_name do
         # It's this player's turn
         handle_player_turn(socket, player_name, game_state, game_pid)
       else
-        # Not this player's turn
-        :gen_tcp.send(socket, "\nWaiting for #{current_player.name} to play...\n")
-        :timer.sleep(1000)
-        handle_game_play(socket, game_pid, player_name)
+        # Not this player's turn - wait for updates or periodic refresh
+        wait_for_turn(socket, game_pid, player_name, current_player)
       end
     end
+  end
+
+  # Wait for turn or updates using a more reliable approach
+  defp wait_for_turn(socket, game_pid, player_name, current_player) do
+    current_name = if current_player, do: current_player.name, else: "Unknown"
+
+    # Tell the player we're waiting for another player's move
+    case :gen_tcp.send(socket, "\nWaiting for #{current_name} to play...\n") do
+      :ok ->
+        :ok
+
+      {:error, _reason} ->
+        handle_client_disconnect(socket, game_pid, player_name)
+        exit(:normal)
+    end
+
+    # Wait for a while then refresh
+    :timer.sleep(3000)
+    handle_game_play(socket, game_pid, player_name)
   end
 
   @doc """
@@ -165,62 +201,166 @@ defmodule GanDengYan.Server.TCPServer do
 
     # Get indexed hand display and mapping
     {hand_display, index_map} = Formatter.format_hand_for_selection(player)
-    :gen_tcp.send(socket, "\nYour cards:\n#{hand_display}\n")
+
+    # Send player's cards
+    case :gen_tcp.send(socket, "\nYour cards:\n#{hand_display}\n") do
+      :ok ->
+        :ok
+
+      {:error, _reason} ->
+        handle_client_disconnect(socket, game_pid, player_name)
+        exit(:normal)
+    end
 
     # Get prompt based on game state
     prompt = Formatter.format_play_prompt(game_state)
-    :gen_tcp.send(socket, prompt)
 
-    # Get client input
-    case :gen_tcp.recv(socket, 0) do
+    # Send prompt
+    case :gen_tcp.send(socket, prompt) do
+      :ok ->
+        :ok
+
+      {:error, _reason} ->
+        handle_client_disconnect(socket, game_pid, player_name)
+        exit(:normal)
+    end
+
+    # Get client input with a longer timeout (2 minutes)
+    case :gen_tcp.recv(socket, 0, 120_000) do
       {:ok, data} ->
         input = String.trim(data)
-        handle_player_input(socket, player_name, game_state, game_pid, input, index_map)
+
+        try do
+          handle_player_input(socket, player_name, game_state, game_pid, input, index_map)
+        catch
+          kind, error ->
+            Logger.error("Error handling player input: #{inspect(kind)}, #{inspect(error)}")
+            stacktrace = Process.info(self(), :current_stacktrace)
+            Logger.error("Stacktrace: #{inspect(stacktrace)}")
+            # Try to recover and continue
+            handle_game_play(socket, game_pid, player_name)
+        end
+
+      {:error, :timeout} ->
+        # Player took too long, notify and prompt again
+        :gen_tcp.send(socket, "Time is running out! Please make a move.\n")
+        handle_player_turn(socket, player_name, game_state, game_pid)
 
       {:error, reason} ->
-        IO.puts("Error receiving data: #{reason}")
-        :gen_tcp.close(socket)
+        Logger.error("Error receiving player input: #{inspect(reason)}")
+        handle_client_disconnect(socket, game_pid, player_name)
+        exit(:normal)
     end
   end
 
   @doc """
-  Processes a player's input during their turn.
+  Processes a player's input when they choose to pass.
   """
   @spec handle_player_input(port(), String.t(), map(), pid(), String.t(), map()) :: no_return()
+  def handle_player_input(
+        socket,
+        player_name,
+        %{last_valid_play: nil} = game_state,
+        game_pid,
+        "pass",
+        _
+      ) do
+    :gen_tcp.send(socket, "You cannot pass on the first play.\n")
+    handle_player_turn(socket, player_name, game_state, game_pid)
+  end
+
   def handle_player_input(socket, player_name, game_state, game_pid, "pass", _) do
-    if is_nil(game_state.last_valid_play) do
-      :gen_tcp.send(socket, "You cannot pass on the first play.\n")
-      handle_player_turn(socket, player_name, game_state, game_pid)
-    else
-      case GameServer.pass(game_pid, player_name) do
-        {:ok, :everyone_passed, last_player_idx} ->
-          last_player = Enum.at(game_state.players, last_player_idx)
+    case GameServer.pass(game_pid, player_name) do
+      {:ok, :everyone_passed, last_player_idx} ->
+        handle_everyone_passed(socket, player_name, game_state, game_pid, last_player_idx)
 
-          message =
-            if player_name == last_player.name do
-              "\n*** Everyone passed on your play! You get to draw a card and play again! ***\n" <>
-                "A card has been added to your hand.\n"
-            else
-              "Everyone passed! #{last_player.name} gets to draw a card and play again.\n"
-            end
+      {:ok, :passed} ->
+        :gen_tcp.send(socket, "You passed.\n")
 
-          :gen_tcp.send(socket, message)
+        # Broadcast to other players
+        pass_message = "\n#{player_name} passed.\n"
+        BroadcastManager.broadcast(pass_message, socket)
+
+        # Broadcast updated game state
+        BroadcastManager.broadcast_game_state(game_pid, socket)
+
+        handle_game_play(socket, game_pid, player_name)
+
+      {:error, reason} ->
+        :gen_tcp.send(socket, "Error: #{error_message(reason)}\n")
+        handle_player_turn(socket, player_name, game_state, game_pid)
+    end
+  end
+
+  def handle_player_input(socket, player_name, game_state, game_pid, input, index_map) do
+    with {:ok, indices} <- parse_indices(input),
+         {:ok, actual_indices} <- validate_indices(indices, index_map) do
+      case GameServer.play_cards(game_pid, player_name, actual_indices) do
+        {:ok, :card_played, pattern} ->
+          :gen_tcp.send(socket, "You played: #{Formatter.format_pattern(pattern)}\n")
+
+          # Broadcast to other players
+          play_message = "\n#{player_name} played: #{Formatter.format_pattern(pattern)}\n"
+          BroadcastManager.broadcast(play_message, socket)
+
+          # Broadcast updated game state
+          BroadcastManager.broadcast_game_state(game_pid, socket)
+
           handle_game_play(socket, game_pid, player_name)
 
-        {:ok, :passed} ->
-          :gen_tcp.send(socket, "You passed.\n")
+        {:ok, :game_over, winner} ->
+          :gen_tcp.send(socket, "You played your last cards and won!\n")
+
+          # Broadcast game over
+          game_over_message = "\nGame over! #{winner} has won the game!\n"
+          BroadcastManager.broadcast(game_over_message, nil)
+
           handle_game_play(socket, game_pid, player_name)
 
         {:error, reason} ->
           :gen_tcp.send(socket, "Error: #{error_message(reason)}\n")
           handle_player_turn(socket, player_name, game_state, game_pid)
       end
+    else
+      {:error, :empty_selection} ->
+        :gen_tcp.send(socket, "Invalid input. Please enter space-separated indices or 'pass'.\n")
+        handle_player_turn(socket, player_name, game_state, game_pid)
+
+      {:error, :invalid_index} ->
+        :gen_tcp.send(socket, "Invalid index. Please use only the numbers shown.\n")
+        handle_player_turn(socket, player_name, game_state, game_pid)
     end
   end
 
-  def handle_player_input(socket, player_name, game_state, game_pid, input, index_map) do
-    # Parse indices
-    display_indices =
+  # Helper functions
+
+  defp handle_everyone_passed(socket, player_name, game_state, game_pid, last_player_idx) do
+    last_player = Enum.at(game_state.players, last_player_idx)
+
+    message =
+      if player_name == last_player.name do
+        "\n*** Everyone passed on your play! You get to draw a card and play again! ***\n" <>
+          "A card has been added to your hand.\n"
+      else
+        "Everyone passed! #{last_player.name} gets to draw a card and play again.\n"
+      end
+
+    :gen_tcp.send(socket, message)
+
+    # Broadcast to others
+    pass_message =
+      "\n#{player_name} passed - everyone has passed. #{last_player.name} goes again.\n"
+
+    BroadcastManager.broadcast(pass_message, socket)
+
+    # Broadcast updated game state
+    BroadcastManager.broadcast_game_state(game_pid, socket)
+
+    handle_game_play(socket, game_pid, player_name)
+  end
+
+  defp parse_indices(input) do
+    indices =
       try do
         input
         |> String.split(" ", trim: true)
@@ -229,33 +369,24 @@ defmodule GanDengYan.Server.TCPServer do
         _ -> []
       end
 
-    if Enum.empty?(display_indices) do
-      :gen_tcp.send(socket, "Invalid input. Please enter space-separated indices or 'pass'.\n")
-      handle_player_turn(socket, player_name, game_state, game_pid)
+    if Enum.empty?(indices), do: {:error, :empty_selection}, else: {:ok, indices}
+  end
+
+  defp validate_indices(indices, index_map) do
+    actual_indices = Enum.map(indices, &Map.get(index_map, &1))
+
+    if Enum.any?(actual_indices, &is_nil/1) do
+      {:error, :invalid_index}
     else
-      # Map display indices to actual hand indices
-      actual_indices = Enum.map(display_indices, fn idx -> Map.get(index_map, idx) end)
-
-      if Enum.any?(actual_indices, &is_nil/1) do
-        :gen_tcp.send(socket, "Invalid index. Please use only the numbers shown.\n")
-        handle_player_turn(socket, player_name, game_state, game_pid)
-      else
-        # Try to play the selected cards
-        case GameServer.play_cards(game_pid, player_name, actual_indices) do
-          {:ok, :card_played, pattern} ->
-            :gen_tcp.send(socket, "You played: #{Formatter.format_pattern(pattern)}\n")
-            handle_game_play(socket, game_pid, player_name)
-
-          {:ok, :game_over, winner} ->
-            :gen_tcp.send(socket, "You played your last cards and won!\n")
-            handle_game_play(socket, game_pid, player_name)
-
-          {:error, reason} ->
-            :gen_tcp.send(socket, "Error: #{error_message(reason)}\n")
-            handle_player_turn(socket, player_name, game_state, game_pid)
-        end
-      end
+      {:ok, actual_indices}
     end
+  end
+
+  defp handle_client_disconnect(socket, _game_pid, player_name) do
+    Logger.info("Handling disconnect for player: #{player_name}")
+    BroadcastManager.unregister_client(socket)
+    # Not actually disconnected - don't mark as such in game server
+    :gen_tcp.close(socket)
   end
 
   # Helper function to convert error atoms to human-readable messages
@@ -278,6 +409,9 @@ defmodule GanDengYan.Server.TCPServer do
 
       :not_your_turn ->
         "It's not your turn."
+
+      :cannot_pass_first_play ->
+        "You cannot pass on the first play."
 
       _ ->
         to_string(reason)

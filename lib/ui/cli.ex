@@ -5,8 +5,9 @@ defmodule GanDengYan.UI.CLI do
   This module handles user input and display for the CLI version of the game.
   """
 
-  alias GanDengYan.Server.{GameServer, TCPServer}
+  alias GanDengYan.Server.{GameServer, TCPServer, TCPClient}
   alias GanDengYan.UI.Formatter
+  require Logger
 
   @doc """
   Main entry point for the CLI application.
@@ -51,7 +52,7 @@ defmodule GanDengYan.UI.CLI do
     # Start a TCP server
     case TCPServer.start(4040, game_pid) do
       {:ok, listen_socket, _} ->
-        IO.puts("Server started on port 4040")
+        # The TCPServer module already logs this, no need for duplication
         accept_connections(listen_socket, game_pid, player_name)
 
       {:error, reason} ->
@@ -135,7 +136,10 @@ defmodule GanDengYan.UI.CLI do
         handle_player_turn(player_name, game_state, game_pid)
       else
         IO.puts("\nWaiting for #{current_player.name} to play...")
-        :timer.sleep(1000)
+
+        # Use shorter sleep time and more responsive loop
+        :timer.sleep(500)
+        # Always refresh game state to see if other players moved
         play_game(player_name, game_pid)
       end
     end
@@ -170,38 +174,38 @@ defmodule GanDengYan.UI.CLI do
   end
 
   @doc """
-  Processes a player's input during their turn.
+  Processes a player's input when they want to pass.
   """
   @spec handle_player_input(String.t(), map(), pid(), String.t(), map()) :: :ok
+  def handle_player_input(player_name, %{last_valid_play: nil} = game_state, game_pid, "pass", _) do
+    IO.puts("You cannot pass on the first play.")
+    handle_player_turn(player_name, game_state, game_pid)
+  end
+
   def handle_player_input(player_name, game_state, game_pid, "pass", _) do
-    if is_nil(game_state.last_valid_play) do
-      IO.puts("You cannot pass on the first play.")
-      handle_player_turn(player_name, game_state, game_pid)
-    else
-      case GameServer.pass(game_pid, player_name) do
-        {:ok, :everyone_passed, last_player_idx} ->
-          last_player = Enum.at(game_state.players, last_player_idx)
+    case GameServer.pass(game_pid, player_name) do
+      {:ok, :everyone_passed, last_player_idx} ->
+        last_player = Enum.at(game_state.players, last_player_idx)
 
-          if player_name == last_player.name do
-            IO.puts(
-              "\n*** Everyone passed on your play! You get to draw a card and play again! ***"
-            )
+        if player_name == last_player.name do
+          IO.puts(
+            "\n*** Everyone passed on your play! You get to draw a card and play again! ***"
+          )
 
-            IO.puts("A card has been added to your hand.")
-          else
-            IO.puts("Everyone passed! #{last_player.name} gets to draw a card and play again.")
-          end
+          IO.puts("A card has been added to your hand.")
+        else
+          IO.puts("Everyone passed! #{last_player.name} gets to draw a card and play again.")
+        end
 
-          play_game(player_name, game_pid)
+        play_game(player_name, game_pid)
 
-        {:ok, :passed} ->
-          IO.puts("You passed.")
-          play_game(player_name, game_pid)
+      {:ok, :passed} ->
+        IO.puts("You passed.")
+        play_game(player_name, game_pid)
 
-        {:error, reason} ->
-          IO.puts("Error: #{Formatter.format_error(reason)}")
-          handle_player_turn(player_name, game_state, game_pid)
-      end
+      {:error, reason} ->
+        IO.puts("Error: #{Formatter.format_error(reason)}")
+        handle_player_turn(player_name, game_state, game_pid)
     end
   end
 
@@ -233,7 +237,7 @@ defmodule GanDengYan.UI.CLI do
             IO.puts("You played: #{Formatter.format_pattern(pattern)}")
             play_game(player_name, game_pid)
 
-          {:ok, :game_over, winner} ->
+          {:ok, :game_over, _winner} ->
             IO.puts("You played your last cards and won!")
             play_game(player_name, game_pid)
 
@@ -259,20 +263,22 @@ defmodule GanDengYan.UI.CLI do
     # Get player name
     player_name = IO.gets("Enter your name: ") |> String.trim()
 
-    # Connect to server using our TCPClient
+    # Connect to server
     IO.puts("Connecting to #{host}:4040...")
 
-    # Using standard connect for simplicity here
-    case :gen_tcp.connect(String.to_charlist(host), 4040, [:binary, packet: :line, active: false]) do
+    # Use TCPClient.connect which properly handles the initial handshake
+    case TCPClient.connect(host, 4040, player_name) do
       {:ok, socket} ->
         IO.puts("Connected to game server!")
 
-        # Use our client loop function with a display function for IO
+        # Display function for client messages
         display_fn = fn msg -> IO.write(msg) end
-        GanDengYan.Server.TCPClient.client_loop(socket, display_fn)
+
+        # Start client loop with the proper display function
+        TCPClient.client_loop(socket, display_fn)
 
       {:error, reason} ->
-        IO.puts("Failed to connect: #{reason}")
+        IO.puts("Failed to connect: #{inspect(reason)}")
         main([])
     end
   end
