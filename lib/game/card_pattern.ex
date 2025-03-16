@@ -5,15 +5,15 @@ defmodule GanDengYan.Game.CardPattern do
   Valid patterns include:
   - Single card
   - Pair (two of same face)
-  - Triplet (three of same face)
-  - Bomb (four of same face)
+  - Bomb (three of same face)
+  - Abomb (four of same face)
   - Sequence (consecutive faces), must be 3 cards
   - Straight (consecutive pairs), must be 4 cards, two consecutive pairs
   """
 
   alias GanDengYan.Game.Card
 
-  @type pattern_type :: :single | :pair | :triplet | :sequence | :bomb | :straight | :invalid
+  @type pattern_type :: :single | :pair | :bomb | :sequence | :abomb | :straight | :invalid
   @type t :: %__MODULE__{
           type: pattern_type(),
           cards: [Card.t()],
@@ -47,9 +47,9 @@ defmodule GanDengYan.Game.CardPattern do
           value = get_pattern_value_with_jokers(sorted_cards, :bomb)
           %__MODULE__{type: :bomb, cards: sorted_cards, value: value}
 
-        is_triplet(sorted_cards) ->
-          value = get_pattern_value_with_jokers(sorted_cards, :triplet)
-          %__MODULE__{type: :triplet, cards: sorted_cards, value: value}
+        is_abomb(sorted_cards) ->
+          value = get_pattern_value_with_jokers(sorted_cards, :abomb)
+          %__MODULE__{type: :abomb, cards: sorted_cards, value: value}
 
         is_straight(sorted_cards) ->
           value = get_pattern_value_with_jokers(sorted_cards, :straight)
@@ -84,12 +84,19 @@ defmodule GanDengYan.Game.CardPattern do
   @spec can_beat(t(), t()) :: boolean()
   def can_beat(pattern, prev_pattern) do
     cond do
-      # Can't beat with different type unless it's a bomb
-      pattern.type != prev_pattern.type and pattern.type != :bomb ->
+      # Can't beat with different type unless it's a bomb or abomb
+      pattern.type != prev_pattern.type and
+        pattern.type != :bomb and
+          pattern.type != :abomb ->
         false
 
-      # Bomb beats everything
-      pattern.type == :bomb and prev_pattern.type != :bomb ->
+      # Bomb or Abomb beats everything
+      pattern.type in [:bomb, :abomb] and
+          prev_pattern.type not in [:bomb, :abomb] ->
+        true
+
+      # Abomb beats any bomb
+      pattern.type == :abomb and prev_pattern.type == :bomb ->
         true
 
       # Compare values for same type
@@ -115,8 +122,8 @@ defmodule GanDengYan.Game.CardPattern do
       case pattern.type do
         :single -> "Single"
         :pair -> "Pair"
-        :triplet -> "Three of a kind"
         :bomb -> "Bomb"
+        :abomb -> "Atomic Bomb"
         :straight -> "Straight pairs"
         :sequence -> "Sequence"
         :invalid -> "Invalid pattern"
@@ -153,8 +160,8 @@ defmodule GanDengYan.Game.CardPattern do
 
   defp is_pair(_), do: false
 
-  ## Triplet
-  defp is_triplet(cards) when length(cards) == 3 do
+  ## Bomb
+  defp is_bomb(cards) when length(cards) == 3 do
     [card1, card2, card3] = cards
     joker_count = Enum.count(cards, &is_joker/1)
 
@@ -175,10 +182,10 @@ defmodule GanDengYan.Game.CardPattern do
     end
   end
 
-  defp is_triplet(_), do: false
+  defp is_bomb(_), do: false
 
-  ## Bomb
-  defp is_bomb(cards) when length(cards) == 4 do
+  ## Abomb
+  defp is_abomb(cards) when length(cards) == 4 do
     joker_count = Enum.count(cards, &is_joker/1)
 
     cond do
@@ -204,7 +211,7 @@ defmodule GanDengYan.Game.CardPattern do
     end
   end
 
-  defp is_bomb(_), do: false
+  defp is_abomb(_), do: false
 
   ## Sequence
   defp is_sequence(cards) when length(cards) == 3 do
@@ -369,8 +376,8 @@ defmodule GanDengYan.Game.CardPattern do
         # When sequence has joker at the highest position, use joker value
         Card.value(%Card{face: :joker})
 
-      # For pairs, triplets, bombs - use the value of the regular card
-      pattern_type in [:pair, :triplet, :bomb] ->
+      # For pairs, bombs, abombs - use the value of the regular card
+      pattern_type in [:pair, :bomb, :abomb] ->
         # The value comes from the highest regular card
         hd(Enum.sort_by(regular_cards, &Card.value/1, :desc)) |> Card.value()
 

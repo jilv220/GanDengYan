@@ -58,8 +58,8 @@ defmodule GanDengYan.Game.CardPatternTest do
     end
   end
 
-  describe "identify/1 for triplets" do
-    test "identifies a regular triplet" do
+  describe "identify/1 for bomb" do
+    test "identifies a regular bomb" do
       cards = [
         card(:king, :hearts),
         card(:king, :spades),
@@ -68,11 +68,11 @@ defmodule GanDengYan.Game.CardPatternTest do
 
       pattern = CardPattern.identify(cards)
 
-      assert pattern.type == :triplet
+      assert pattern.type == :bomb
       assert pattern.value == Card.value(card(:king, :hearts))
     end
 
-    test "identifies a triplet with one joker" do
+    test "identifies a bomb with one joker" do
       cards = [
         card(5, :clubs),
         card(5, :diamonds),
@@ -81,11 +81,11 @@ defmodule GanDengYan.Game.CardPatternTest do
 
       pattern = CardPattern.identify(cards)
 
-      assert pattern.type == :triplet
+      assert pattern.type == :bomb
       assert pattern.value == 5
     end
 
-    test "identifies a triplet with two jokers" do
+    test "identifies a bomb with two jokers" do
       cards = [
         card(:queen, :hearts),
         joker(),
@@ -94,21 +94,21 @@ defmodule GanDengYan.Game.CardPatternTest do
 
       pattern = CardPattern.identify(cards)
 
-      assert pattern.type == :triplet
+      assert pattern.type == :bomb
       assert pattern.value == Card.value(card(:queen, :hearts))
     end
 
-    test "identifies a triplet of jokers" do
+    test "identifies a bomb of jokers" do
       cards = [joker(), joker(), joker()]
       pattern = CardPattern.identify(cards)
 
-      assert pattern.type == :triplet
+      assert pattern.type == :bomb
       assert pattern.value == Card.value(joker())
     end
   end
 
-  describe "identify/1 for bombs" do
-    test "identifies a regular bomb" do
+  describe "identify/1 for abombs" do
+    test "identifies a regular abomb" do
       cards = [
         card(10, :hearts),
         card(10, :spades),
@@ -118,11 +118,11 @@ defmodule GanDengYan.Game.CardPatternTest do
 
       pattern = CardPattern.identify(cards)
 
-      assert pattern.type == :bomb
+      assert pattern.type == :abomb
       assert pattern.value == 10
     end
 
-    test "identifies a bomb with one joker" do
+    test "identifies an abomb with one joker" do
       cards = [
         card(:jack, :clubs),
         card(:jack, :diamonds),
@@ -132,11 +132,11 @@ defmodule GanDengYan.Game.CardPatternTest do
 
       pattern = CardPattern.identify(cards)
 
-      assert pattern.type == :bomb
+      assert pattern.type == :abomb
       assert pattern.value == Card.value(card(:jack, :hearts))
     end
 
-    test "identifies a bomb with two jokers" do
+    test "identifies an abomb with two jokers" do
       cards = [
         card(8, :hearts),
         card(8, :spades),
@@ -146,11 +146,11 @@ defmodule GanDengYan.Game.CardPatternTest do
 
       pattern = CardPattern.identify(cards)
 
-      assert pattern.type == :bomb
+      assert pattern.type == :abomb
       assert pattern.value == 8
     end
 
-    test "identifies a bomb with three jokers" do
+    test "identifies an abomb with three jokers" do
       cards = [
         card(:ace, :hearts),
         joker(),
@@ -160,19 +160,19 @@ defmodule GanDengYan.Game.CardPatternTest do
 
       pattern = CardPattern.identify(cards)
 
-      assert pattern.type == :bomb
+      assert pattern.type == :abomb
       assert pattern.value == Card.value(card(:ace, :hearts))
     end
 
-    test "identifies a bomb of four jokers" do
+    test "identifies an abomb of four jokers" do
       cards = [joker(), joker(), joker(), joker()]
       pattern = CardPattern.identify(cards)
 
-      assert pattern.type == :bomb
+      assert pattern.type == :abomb
       assert pattern.value == Card.value(joker())
     end
 
-    test "identifies a bomb with jokers forming entire pairs" do
+    test "identifies an abomb with jokers forming entire pairs" do
       cards = [
         # 9 bomb
         card(9, :hearts),
@@ -183,7 +183,7 @@ defmodule GanDengYan.Game.CardPatternTest do
 
       pattern = CardPattern.identify(cards)
 
-      assert pattern.type == :bomb
+      assert pattern.type == :abomb
       assert pattern.value == 9
     end
   end
@@ -351,7 +351,7 @@ defmodule GanDengYan.Game.CardPatternTest do
     end
 
     test "bomb beats any non-bomb pattern" do
-      bomb =
+      abomb =
         CardPattern.identify([
           card(8, :hearts),
           card(8, :spades),
@@ -359,15 +359,15 @@ defmodule GanDengYan.Game.CardPatternTest do
           card(8, :clubs)
         ])
 
-      triplet =
+      bomb =
         CardPattern.identify([
           card(:ace, :hearts),
           card(:ace, :spades),
           card(:ace, :diamonds)
         ])
 
-      assert CardPattern.can_beat(bomb, triplet)
-      refute CardPattern.can_beat(triplet, bomb)
+      assert CardPattern.can_beat(abomb, bomb)
+      refute CardPattern.can_beat(bomb, abomb)
     end
 
     test "higher bomb beats lower bomb" do
@@ -415,15 +415,15 @@ defmodule GanDengYan.Game.CardPatternTest do
     test "different pattern types cannot beat each other" do
       pair = CardPattern.identify([card(2, :hearts), card(2, :spades)])
 
-      triplet =
+      bomb =
         CardPattern.identify([
           card(:jack, :hearts),
           card(:jack, :spades),
           card(:jack, :diamonds)
         ])
 
-      refute CardPattern.can_beat(pair, triplet)
-      refute CardPattern.can_beat(triplet, pair)
+      refute CardPattern.can_beat(pair, bomb)
+      assert CardPattern.can_beat(bomb, pair)
     end
   end
 end
