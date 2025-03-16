@@ -52,12 +52,68 @@ defmodule GanDengYan.UI.CLI do
     # Start a TCP server
     case TCPServer.start(4040, game_pid) do
       {:ok, listen_socket, _} ->
-        # The TCPServer module already logs this, no need for duplication
-        accept_connections(listen_socket, game_pid, player_name)
+        # !!!
+        # Start a separate process to accept connections continuously
+        # This ensures we can accept multiple clients even while waiting for input
+        # !!!
+        connection_pid =
+          spawn_link(fn ->
+            TCPServer.accept_connections(listen_socket, game_pid)
+          end)
+
+        Process.monitor(connection_pid)
+
+        # Now manage the game in this process
+        manage_game_lobby(game_pid, player_name)
 
       {:error, reason} ->
         IO.puts("Error starting server: #{reason}")
         :ok
+    end
+  end
+
+  @doc """
+  Manages the game lobby, allowing the host to see connected players and start the game.
+  """
+  @spec manage_game_lobby(pid(), String.t()) :: :ok
+  def manage_game_lobby(game_pid, player_name) do
+    # Get current game state
+    game_state = GameServer.get_state(game_pid)
+    player_count = length(game_state.players)
+
+    # Display current players
+    IO.puts(
+      "\nCurrent players (#{player_count}): #{Enum.map_join(game_state.players, ", ", & &1.name)}"
+    )
+
+    # Only allow starting if we have enough players
+    if player_count >= 2 do
+      input = IO.gets("Ready to start the game? (yes/wait): ") |> String.trim()
+
+      case input do
+        "yes" ->
+          case GameServer.start_game(game_pid) do
+            {:ok, _} ->
+              IO.puts("Game started!")
+              play_game(player_name, game_pid)
+
+            {:error, reason} ->
+              IO.puts("Error starting game: #{Formatter.format_error(reason)}")
+              manage_game_lobby(game_pid, player_name)
+          end
+
+        _ ->
+          # Wait for more players
+          # Give time for new connections
+          :timer.sleep(2000)
+          manage_game_lobby(game_pid, player_name)
+      end
+    else
+      # Not enough players yet
+      IO.puts("Waiting for more players to join...")
+      # Check again after 2 seconds
+      :timer.sleep(2000)
+      manage_game_lobby(game_pid, player_name)
     end
   end
 

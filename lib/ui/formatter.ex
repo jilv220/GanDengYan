@@ -35,7 +35,7 @@ defmodule GanDengYan.UI.Formatter do
   end
 
   @doc """
-  Formats a player's hand with indices for selection.
+  Formats a player's hand with indices for selection in a compact way.
 
   Returns a tuple with the formatted string and a map of display indices to actual indices.
   """
@@ -54,15 +54,22 @@ defmodule GanDengYan.UI.Formatter do
       end)
       |> Map.new()
 
-    # Format the hand for display
-    hand_str =
+    # Format the hand for display in a compact way
+    cards_with_indices =
       sorted_hand
       |> Enum.with_index()
-      |> Enum.map_join("\n", fn {card, idx} ->
-        "#{idx}: #{Card.to_string(card)}"
+      |> Enum.map(fn {card, idx} ->
+        "#{idx}:#{Card.to_string(card)}"
       end)
 
-    {hand_str, index_map}
+    # Group cards into rows of 5 for more compact display
+    rows =
+      cards_with_indices
+      |> Enum.chunk_every(5)
+      |> Enum.map(fn chunk -> Enum.join(chunk, "  ") end)
+      |> Enum.join("\n")
+
+    {rows, index_map}
   end
 
   @doc """

@@ -157,6 +157,9 @@ defmodule GanDengYan.Server.TCPServer do
       # Game over
       :gen_tcp.send(socket, "Game over! #{game_state.winner} wins!\n")
       :gen_tcp.send(socket, "Thanks for playing! Press Ctrl+C to exit.\n")
+
+      # Give client some time to display the message before closing
+      :timer.sleep(5000)
       :gen_tcp.close(socket)
     else
       # Get current player
@@ -314,6 +317,7 @@ defmodule GanDengYan.Server.TCPServer do
           # Broadcast game over
           game_over_message = "\nGame over! #{winner} has won the game!\n"
           BroadcastManager.broadcast(game_over_message, nil)
+          BroadcastManager.broadcast_game_state(game_pid, socket)
 
           handle_game_play(socket, game_pid, player_name)
 

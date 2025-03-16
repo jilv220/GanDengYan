@@ -28,8 +28,8 @@ defmodule GanDengYan.Game.CardPattern do
   Returns a CardPattern struct with the identified type, cards, and value.
 
   Pattern recognition priority:
-  1. Bomb (four of a kind) - highest priority
-  2. Triplet (three of a kind)
+  1. ABomb (four of a kind) - highest priority
+  2. Bomb (three of a kind)
   3. Straight (consecutive pairs)
   4. Sequence (consecutive cards)
   5. Pair
@@ -49,13 +49,13 @@ defmodule GanDengYan.Game.CardPattern do
           value = Card.value(%Card{face: :joker})
           %__MODULE__{type: :bomb, cards: sorted_cards, value: value}
 
-        is_bomb(sorted_cards) ->
-          value = get_pattern_value_with_jokers(sorted_cards, :bomb)
-          %__MODULE__{type: :bomb, cards: sorted_cards, value: value}
-
         is_abomb(sorted_cards) ->
           value = get_pattern_value_with_jokers(sorted_cards, :abomb)
           %__MODULE__{type: :abomb, cards: sorted_cards, value: value}
+
+        is_bomb(sorted_cards) ->
+          value = get_pattern_value_with_jokers(sorted_cards, :bomb)
+          %__MODULE__{type: :bomb, cards: sorted_cards, value: value}
 
         is_straight(sorted_cards) ->
           value = get_pattern_value_with_jokers(sorted_cards, :straight)
