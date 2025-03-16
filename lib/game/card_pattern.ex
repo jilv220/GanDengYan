@@ -5,7 +5,7 @@ defmodule GanDengYan.Game.CardPattern do
   Valid patterns include:
   - Single card
   - Pair (two of same face)
-  - Bomb (three of same face)
+  - Bomb (three of same face, or a pair of jokers)
   - Abomb (four of same face)
   - Sequence (consecutive faces), must be 3 cards
   - Straight (consecutive pairs), must be 4 cards, two consecutive pairs
@@ -36,6 +36,7 @@ defmodule GanDengYan.Game.CardPattern do
   6. Single
 
   When jokers are present, they will preferentially complete the highest-ranked pattern possible.
+  A pair of jokers is considered a bomb.
   """
   @spec identify([Card.t()]) :: t()
   def identify(cards) do
@@ -43,6 +44,11 @@ defmodule GanDengYan.Game.CardPattern do
 
     pattern =
       cond do
+        # Special case: a pair of jokers is a bomb
+        is_joker_pair_bomb(sorted_cards) ->
+          value = Card.value(%Card{face: :joker})
+          %__MODULE__{type: :bomb, cards: sorted_cards, value: value}
+
         is_bomb(sorted_cards) ->
           value = get_pattern_value_with_jokers(sorted_cards, :bomb)
           %__MODULE__{type: :bomb, cards: sorted_cards, value: value}
@@ -138,6 +144,13 @@ defmodule GanDengYan.Game.CardPattern do
   defp is_joker(%Card{face: :joker}), do: true
   defp is_joker(_), do: false
 
+  ## Special case for joker pair as bomb
+  defp is_joker_pair_bomb(cards) when length(cards) == 2 do
+    Enum.all?(cards, &is_joker/1)
+  end
+
+  defp is_joker_pair_bomb(_), do: false
+
   ## Single
   # Jokers can't be played as singles
   defp is_single([%Card{face: :joker}]), do: false
@@ -147,11 +160,10 @@ defmodule GanDengYan.Game.CardPattern do
   # Pair
   defp is_pair(cards) when length(cards) == 2 do
     [card1, card2] = cards
-    # If one card is a joker, the other card determines the pair's value
-    # If both are jokers, they're considered a valid pair
+    # If both are jokers, they're considered a bomb, not a pair
     case {is_joker(card1), is_joker(card2)} do
-      # TODO: A pair of jokers is a bomb...
-      {true, true} -> true
+      # A pair of jokers is now a bomb
+      {true, true} -> false
       {true, false} -> true
       {false, true} -> true
       {false, false} -> card1.face == card2.face

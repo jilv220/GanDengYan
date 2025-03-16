@@ -42,14 +42,6 @@ defmodule GanDengYan.Game.CardPatternTest do
       assert pattern.value == 9
     end
 
-    test "identifies a pair of jokers" do
-      cards = [joker(), joker()]
-      pattern = CardPattern.identify(cards)
-
-      assert pattern.type == :pair
-      assert pattern.value == Card.value(joker())
-    end
-
     test "rejects cards that don't form a pair" do
       cards = [card(8, :diamonds), card(9, :hearts)]
       pattern = CardPattern.identify(cards)
@@ -98,8 +90,16 @@ defmodule GanDengYan.Game.CardPatternTest do
       assert pattern.value == Card.value(card(:queen, :hearts))
     end
 
-    test "identifies a bomb of jokers" do
+    test "identifies a bomb with all jokers" do
       cards = [joker(), joker(), joker()]
+      pattern = CardPattern.identify(cards)
+
+      assert pattern.type == :bomb
+      assert pattern.value == Card.value(joker())
+    end
+
+    test "identifies a special bomb" do
+      cards = [joker(), joker()]
       pattern = CardPattern.identify(cards)
 
       assert pattern.type == :bomb
